@@ -1,0 +1,37 @@
+type User {
+    id:ID!
+    name:String!
+    email:String!
+    followers:[User!]!
+    following:[User!]!
+    created_at: Time!
+    updated_at: Time
+}
+
+input NewUser {
+    name: String!
+    email: String!
+    password: String!
+}
+
+input LoginUser {
+    email: String!
+    password: String!
+}
+
+type LoginResponse {
+    token: String!
+    user: User!
+}
+
+type UserQuery {
+  detail(id: ID!): User! @goField(forceResolver: true)
+  me: User! @goField(forceResolver: true) @isLogin
+}
+
+type UserMutation {
+  register(input: NewUser!): String! @goField(forceResolver: true)
+  login(input: LoginUser!): LoginResponse! @goField(forceResolver: true)
+  follow(userId: ID!): String! @goField(forceResolver: true) @isLogin
+  unfollow(userId: ID!): String! @goField(forceResolver: true) @isLogin
+}
