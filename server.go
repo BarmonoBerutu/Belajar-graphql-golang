@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"simple-userfollow-graphql/config"
+	"simple-userfollow-graphql/dataloader"
 	"simple-userfollow-graphql/directives"
 	"simple-userfollow-graphql/graph"
 	"simple-userfollow-graphql/middleware"
@@ -39,6 +40,7 @@ func main() {
 	router := chi.NewRouter()
 	router.Use(
 		middleware.AuthMiddleware,
+		dataloader.Middleware,
 	)
 
 	c := graph.Config{Resolvers: &graph.Resolver{}}

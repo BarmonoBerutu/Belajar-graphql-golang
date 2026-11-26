@@ -2,8 +2,8 @@ type User {
     id:ID!
     name:String!
     email:String!
-    followers:[User!]!
-    following:[User!]!
+    followers: [User!]! @goField(forceResolver: true)
+    following: [User!]! @goField(forceResolver: true)
     created_at: Time!
     updated_at: Time
 }
@@ -25,8 +25,16 @@ type LoginResponse {
 }
 
 type UserQuery {
-  detail(id: ID!): User! @goField(forceResolver: true)
+    list(filters: [Filter], page: Int, limit: Int): UserList! @goField(forceResolver: true)
+  detail(id: ID!): User! @goField(forceResolver: true) 
   me: User! @goField(forceResolver: true) @isLogin
+}
+
+type UserList {
+    page: Int
+    limit: Int
+    filters: [FilterQuery]
+    nodes: [User]! @goField(forceResolver: true)
 }
 
 type UserMutation {

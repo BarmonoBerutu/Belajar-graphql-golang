@@ -137,3 +137,39 @@ func (s *Service) UserGetByEmail(ctx context.Context, email string) (*model.User
 
 	return &user, nil
 }
+
+func (s *Service) UserGetListPaginated(ctx context.Context, filters []*model.FilterQuery, page, limit *int) ([]*model.User, error) {
+	var (
+		users []*model.User
+		query = s.DB.Model(&users).Scopes(tools.IsDeletedAtNull)
+	)
+
+	for _, v := range filters {
+		var operation string
+
+		switch v.Clause {
+		case model.ClauseIsequalto:
+			operation = "="
+		case model.ClauseIsgreaterthan:
+			operation = ">"
+		case model.ClauseIsgreaterthanequal:
+			operation = ">="
+		}
+
+		if v.Clause == model.ClauseLike {
+			query = query.Where(fmt.Sprintf("%s LIKE '%%%s%%'", v.Field, v.Value))
+		} else {
+			query = query.Where(fmt.Sprintf("%s", v.Field)+operation+"?", v.Value)
+		}
+	}
+
+	if page != nil && limit != nil {
+		query = query.Offset((*page - 1) * *limit).Limit(*limit)
+	}
+
+	if err := query.Find(&users).Error; err != nil {
+		return nil, err
+	}
+
+	return users, nil
+}

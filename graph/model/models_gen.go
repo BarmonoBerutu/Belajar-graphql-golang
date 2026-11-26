@@ -2,6 +2,27 @@
 
 package model
 
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"strconv"
+)
+
+type Filter struct {
+	Field  string `json:"field"`
+	Value  any    `json:"value"`
+	Type   Type   `json:"type"`
+	Clause Clause `json:"clause"`
+}
+
+type FilterQuery struct {
+	Field  string `json:"field"`
+	Value  any    `json:"value"`
+	Type   Type   `json:"type"`
+	Clause Clause `json:"clause"`
+}
+
 type LoginResponse struct {
 	Token string `json:"token"`
 	User  *User  `json:"user"`
@@ -24,6 +45,13 @@ type NewUser struct {
 type Query struct {
 }
 
+type UserList struct {
+	Page    *int           `json:"page,omitempty"`
+	Limit   *int           `json:"limit,omitempty"`
+	Filters []*FilterQuery `json:"filters,omitempty"`
+	Nodes   []*User        `json:"nodes"`
+}
+
 type UserMutation struct {
 	Register string         `json:"register"`
 	Login    *LoginResponse `json:"login"`
@@ -32,6 +60,125 @@ type UserMutation struct {
 }
 
 type UserQuery struct {
-	Detail *User `json:"detail"`
-	Me     *User `json:"me"`
+	List   *UserList `json:"list"`
+	Detail *User     `json:"detail"`
+	Me     *User     `json:"me"`
+}
+
+type Clause string
+
+const (
+	ClauseIsequalto          Clause = "ISEQUALTO"
+	ClauseWherein            Clause = "WHEREIN"
+	ClauseIsgreaterthan      Clause = "ISGREATERTHAN"
+	ClauseIsgreaterthanequal Clause = "ISGREATERTHANEQUAL"
+	ClauseLike               Clause = "LIKE"
+)
+
+var AllClause = []Clause{
+	ClauseIsequalto,
+	ClauseWherein,
+	ClauseIsgreaterthan,
+	ClauseIsgreaterthanequal,
+	ClauseLike,
+}
+
+func (e Clause) IsValid() bool {
+	switch e {
+	case ClauseIsequalto, ClauseWherein, ClauseIsgreaterthan, ClauseIsgreaterthanequal, ClauseLike:
+		return true
+	}
+	return false
+}
+
+func (e Clause) String() string {
+	return string(e)
+}
+
+func (e *Clause) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = Clause(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid Clause", str)
+	}
+	return nil
+}
+
+func (e Clause) MarshalGQL(w io.Writer) {
+	_, _ = fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *Clause) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e Clause) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type Type string
+
+const (
+	TypeString Type = "STRING"
+	TypeInt    Type = "INT"
+	TypeBool   Type = "BOOL"
+)
+
+var AllType = []Type{
+	TypeString,
+	TypeInt,
+	TypeBool,
+}
+
+func (e Type) IsValid() bool {
+	switch e {
+	case TypeString, TypeInt, TypeBool:
+		return true
+	}
+	return false
+}
+
+func (e Type) String() string {
+	return string(e)
+}
+
+func (e *Type) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = Type(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid Type", str)
+	}
+	return nil
+}
+
+func (e Type) MarshalGQL(w io.Writer) {
+	_, _ = fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *Type) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e Type) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
 }

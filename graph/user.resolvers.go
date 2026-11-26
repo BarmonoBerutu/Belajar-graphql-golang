@@ -7,39 +7,153 @@ package graph
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"simple-userfollow-graphql/dataloader"
 	"simple-userfollow-graphql/graph/model"
+	"simple-userfollow-graphql/middleware"
+	"simple-userfollow-graphql/service"
+	"simple-userfollow-graphql/tools"
+
+	"gorm.io/gorm"
 )
+
+// Followers is the resolver for the followers field.
+func (r *userResolver) Followers(ctx context.Context, obj *model.User) ([]*model.User, error) {
+	return dataloader.For(ctx).FollowersByUserID.Load(obj.ID)
+}
+
+// Following is the resolver for the following field.
+func (r *userResolver) Following(ctx context.Context, obj *model.User) ([]*model.User, error) {
+	return dataloader.For(ctx).FollowingByUserID.Load(obj.ID)
+}
+
+// Nodes is the resolver for the nodes field.
+func (r *userListResolver) Nodes(ctx context.Context, obj *model.UserList) ([]*model.User, error) {
+	s := service.GetService()
+
+	return s.UserGetListPaginated(ctx, obj.Filters, obj.Page, obj.Limit)
+}
 
 // Register is the resolver for the register field.
 func (r *userMutationResolver) Register(ctx context.Context, obj *model.UserMutation, input model.NewUser) (string, error) {
-	panic(fmt.Errorf("not implemented: Register - register"))
+	s := service.GetTransaction()
+	defer func() {
+		if r := recover(); r != nil {
+			s.Rollback(r)
+		}
+	}()
+	_, err := s.UserOnCreate(ctx, input)
+	if err != nil {
+		s.Rollback(err)
+		err := tools.ToGqlError(err)
+		if err != nil {
+			s.Rollback(err)
+			err = tools.ToGqlError(err)
+			return "Failed", err
+		}
+	}
+	s.Commit()
+	return "Success", nil
 }
 
 // Login is the resolver for the login field.
 func (r *userMutationResolver) Login(ctx context.Context, obj *model.UserMutation, input model.LoginUser) (*model.LoginResponse, error) {
-	panic(fmt.Errorf("not implemented: Login - login"))
+	s := service.GetService()
+
+	resp, err := s.UserLogin(ctx, input)
+	if err != nil {
+		err = tools.ToGqlError(err)
+		return nil, err
+	}
+	return resp, nil
 }
 
 // Follow is the resolver for the follow field.
 func (r *userMutationResolver) Follow(ctx context.Context, obj *model.UserMutation, userID int) (string, error) {
-	panic(fmt.Errorf("not implemented: Follow - follow"))
+	currentUser := middleware.AuthContext(ctx)
+	if currentUser == nil {
+		return "Failed", tools.NewGqlError("Unauthenticated", tools.GqlUnauthenticated)
+	}
+
+	err := service.GetService().UserFollow(ctx, currentUser.ID, userID)
+	if err != nil {
+		return "Failed", tools.ToGqlError(err)
+	}
+
+	return "Success", nil
 }
 
 // Unfollow is the resolver for the unfollow field.
 func (r *userMutationResolver) Unfollow(ctx context.Context, obj *model.UserMutation, userID int) (string, error) {
-	panic(fmt.Errorf("not implemented: Unfollow - unfollow"))
+	currentUser := middleware.AuthContext(ctx)
+	if currentUser == nil {
+		return "Failed", tools.NewGqlError("Unauthenticated", tools.GqlUnauthenticated)
+	}
+
+	err := service.GetService().UserUnfollow(ctx, currentUser.ID, userID)
+	if err != nil {
+		return "Failed", tools.ToGqlError(err)
+	}
+
+	return "Success", nil
+}
+
+// List is the resolver for the list field.
+func (r *userQueryResolver) List(ctx context.Context, obj *model.UserQuery, filters []*model.Filter, page *int, limit *int) (*model.UserList, error) {
+	return &model.UserList{
+		Page:    page,
+		Limit:   limit,
+		Filters: tools.FilterToFilterQuery(filters),
+	}, nil
 }
 
 // Detail is the resolver for the detail field.
 func (r *userQueryResolver) Detail(ctx context.Context, obj *model.UserQuery, id int) (*model.User, error) {
-	panic(fmt.Errorf("not implemented: Detail - detail"))
+	// currentUser := middleware.AuthContext(ctx)
+	// if currentUser == nil {
+	// 	return nil, tools.NewGqlError("Unauthenticated", tools.GqlUnauthenticated)
+	// }
+
+	// if currentUser.ID != id {
+	// 	return nil, tools.NewGqlError(
+	// 		"Tidak bisa akses detail orang lain",
+	// 		tools.GqlForbidden,
+	// 	)
+	// }
+	user, err := service.GetService().UserGetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, tools.NewGqlError("User not found", tools.GqlNotFound)
+		}
+		return nil, tools.ToGqlError(err)
+	}
+
+	return user, nil
 }
 
 // Me is the resolver for the me field.
 func (r *userQueryResolver) Me(ctx context.Context, obj *model.UserQuery) (*model.User, error) {
-	panic(fmt.Errorf("not implemented: Me - me"))
+	currentUser := middleware.AuthContext(ctx)
+	if currentUser == nil {
+		return nil, tools.NewGqlError("Unauthenticated", tools.GqlUnauthenticated)
+	}
+
+	user, err := service.GetService().UserGetByID(ctx, currentUser.ID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, tools.NewGqlError("User not found", tools.GqlNotFound)
+		}
+		return nil, tools.ToGqlError(err)
+	}
+
+	return user, nil
 }
+
+// User returns UserResolver implementation.
+func (r *Resolver) User() UserResolver { return &userResolver{r} }
+
+// UserList returns UserListResolver implementation.
+func (r *Resolver) UserList() UserListResolver { return &userListResolver{r} }
 
 // UserMutation returns UserMutationResolver implementation.
 func (r *Resolver) UserMutation() UserMutationResolver { return &userMutationResolver{r} }
@@ -48,6 +162,8 @@ func (r *Resolver) UserMutation() UserMutationResolver { return &userMutationRes
 func (r *Resolver) UserQuery() UserQueryResolver { return &userQueryResolver{r} }
 
 type (
+	userResolver         struct{ *Resolver }
+	userListResolver     struct{ *Resolver }
 	userMutationResolver struct{ *Resolver }
 	userQueryResolver    struct{ *Resolver }
 )

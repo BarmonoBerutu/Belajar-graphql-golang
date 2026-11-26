@@ -32,6 +32,8 @@ type Config = graphql.Config[ResolverRoot, DirectiveRoot, ComplexityRoot]
 type ResolverRoot interface {
 	Mutation() MutationResolver
 	Query() QueryResolver
+	User() UserResolver
+	UserList() UserListResolver
 	UserMutation() UserMutationResolver
 	UserQuery() UserQueryResolver
 }
@@ -41,6 +43,13 @@ type DirectiveRoot struct {
 }
 
 type ComplexityRoot struct {
+	FilterQuery struct {
+		Clause func(childComplexity int) int
+		Field  func(childComplexity int) int
+		Type   func(childComplexity int) int
+		Value  func(childComplexity int) int
+	}
+
 	LoginResponse struct {
 		Token func(childComplexity int) int
 		User  func(childComplexity int) int
@@ -64,6 +73,13 @@ type ComplexityRoot struct {
 		UpdatedAt func(childComplexity int) int
 	}
 
+	UserList struct {
+		Filters func(childComplexity int) int
+		Limit   func(childComplexity int) int
+		Nodes   func(childComplexity int) int
+		Page    func(childComplexity int) int
+	}
+
 	UserMutation struct {
 		Follow   func(childComplexity int, userID int) int
 		Login    func(childComplexity int, input model.LoginUser) int
@@ -73,6 +89,7 @@ type ComplexityRoot struct {
 
 	UserQuery struct {
 		Detail func(childComplexity int, id int) int
+		List   func(childComplexity int, filters []*model.Filter, page *int, limit *int) int
 		Me     func(childComplexity int) int
 	}
 }
@@ -87,6 +104,13 @@ type MutationResolver interface {
 type QueryResolver interface {
 	User(ctx context.Context) (*model.UserQuery, error)
 }
+type UserResolver interface {
+	Followers(ctx context.Context, obj *model.User) ([]*model.User, error)
+	Following(ctx context.Context, obj *model.User) ([]*model.User, error)
+}
+type UserListResolver interface {
+	Nodes(ctx context.Context, obj *model.UserList) ([]*model.User, error)
+}
 type UserMutationResolver interface {
 	Register(ctx context.Context, obj *model.UserMutation, input model.NewUser) (string, error)
 	Login(ctx context.Context, obj *model.UserMutation, input model.LoginUser) (*model.LoginResponse, error)
@@ -94,6 +118,7 @@ type UserMutationResolver interface {
 	Unfollow(ctx context.Context, obj *model.UserMutation, userID int) (string, error)
 }
 type UserQueryResolver interface {
+	List(ctx context.Context, obj *model.UserQuery, filters []*model.Filter, page *int, limit *int) (*model.UserList, error)
 	Detail(ctx context.Context, obj *model.UserQuery, id int) (*model.User, error)
 	Me(ctx context.Context, obj *model.UserQuery) (*model.User, error)
 }
@@ -115,6 +140,31 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 	ec := newExecutionContext(nil, e, nil)
 	_ = ec
 	switch typeName + "." + field {
+
+	case "FilterQuery.clause":
+		if e.ComplexityRoot.FilterQuery.Clause == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FilterQuery.Clause(childComplexity), true
+	case "FilterQuery.field":
+		if e.ComplexityRoot.FilterQuery.Field == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FilterQuery.Field(childComplexity), true
+	case "FilterQuery.type":
+		if e.ComplexityRoot.FilterQuery.Type == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FilterQuery.Type(childComplexity), true
+	case "FilterQuery.value":
+		if e.ComplexityRoot.FilterQuery.Value == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FilterQuery.Value(childComplexity), true
 
 	case "LoginResponse.token":
 		if e.ComplexityRoot.LoginResponse.Token == nil {
@@ -186,6 +236,31 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.User.UpdatedAt(childComplexity), true
 
+	case "UserList.filters":
+		if e.ComplexityRoot.UserList.Filters == nil {
+			break
+		}
+
+		return e.ComplexityRoot.UserList.Filters(childComplexity), true
+	case "UserList.limit":
+		if e.ComplexityRoot.UserList.Limit == nil {
+			break
+		}
+
+		return e.ComplexityRoot.UserList.Limit(childComplexity), true
+	case "UserList.nodes":
+		if e.ComplexityRoot.UserList.Nodes == nil {
+			break
+		}
+
+		return e.ComplexityRoot.UserList.Nodes(childComplexity), true
+	case "UserList.page":
+		if e.ComplexityRoot.UserList.Page == nil {
+			break
+		}
+
+		return e.ComplexityRoot.UserList.Page(childComplexity), true
+
 	case "UserMutation.follow":
 		if e.ComplexityRoot.UserMutation.Follow == nil {
 			break
@@ -242,6 +317,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.UserQuery.Detail(childComplexity, args["id"].(int)), true
+	case "UserQuery.list":
+		if e.ComplexityRoot.UserQuery.List == nil {
+			break
+		}
+
+		args, err := ec.field_UserQuery_list_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.UserQuery.List(childComplexity, args["filters"].([]*model.Filter), args["page"].(*int), args["limit"].(*int)), true
 	case "UserQuery.me":
 		if e.ComplexityRoot.UserQuery.Me == nil {
 			break
@@ -258,6 +344,7 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 	ec := newExecutionContext(opCtx, e, make(chan graphql.DeferredResult))
 	inputUnmarshalers := func() *graphql.InputUnmarshalerIndex {
 		return graphql.NewInputUnmarshalerIndex(
+			graphql.NewInputUnmarshaler("Filter", ec.unmarshalInputFilter),
 			graphql.NewInputUnmarshaler("LoginUser", ec.unmarshalInputLoginUser),
 			graphql.NewInputUnmarshaler("NewUser", ec.unmarshalInputNewUser),
 		)
@@ -335,7 +422,7 @@ func newExecutionContext(
 	}
 }
 
-//go:embed "directives.graphqls" "schema.graphqls" "user.graphqls"
+//go:embed "directives.graphqls" "filter.graphqls" "scalar.graphqls" "schema.graphqls" "user.graphqls"
 var sourcesFS embed.FS
 
 func sourceData(filename string) string {
@@ -348,6 +435,8 @@ func sourceData(filename string) string {
 
 var sources = []*ast.Source{
 	{Name: "directives.graphqls", Input: sourceData("directives.graphqls"), BuiltIn: false},
+	{Name: "filter.graphqls", Input: sourceData("filter.graphqls"), BuiltIn: false},
+	{Name: "scalar.graphqls", Input: sourceData("scalar.graphqls"), BuiltIn: false},
 	{Name: "schema.graphqls", Input: sourceData("schema.graphqls"), BuiltIn: false},
 	{Name: "user.graphqls", Input: sourceData("user.graphqls"), BuiltIn: false},
 }
@@ -356,6 +445,20 @@ var parsedSchema = gqlparser.MustLoadSchema(sources...)
 // childFields_* functions provide shared child field context lookups.
 // Each function is generated once per unique object type, deduplicating the
 // switch statements that were previously inlined in every fieldContext_* function.
+
+func (ec *executionContext) childFields_FilterQuery(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "field":
+		return ec.fieldContext_FilterQuery_field(ctx, field)
+	case "value":
+		return ec.fieldContext_FilterQuery_value(ctx, field)
+	case "type":
+		return ec.fieldContext_FilterQuery_type(ctx, field)
+	case "clause":
+		return ec.fieldContext_FilterQuery_clause(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type FilterQuery", field.Name)
+}
 
 func (ec *executionContext) childFields_LoginResponse(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 	switch field.Name {
@@ -387,6 +490,20 @@ func (ec *executionContext) childFields_User(ctx context.Context, field graphql.
 	return nil, fmt.Errorf("no field named %q was found under type User", field.Name)
 }
 
+func (ec *executionContext) childFields_UserList(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "page":
+		return ec.fieldContext_UserList_page(ctx, field)
+	case "limit":
+		return ec.fieldContext_UserList_limit(ctx, field)
+	case "filters":
+		return ec.fieldContext_UserList_filters(ctx, field)
+	case "nodes":
+		return ec.fieldContext_UserList_nodes(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type UserList", field.Name)
+}
+
 func (ec *executionContext) childFields_UserMutation(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 	switch field.Name {
 	case "register":
@@ -403,6 +520,8 @@ func (ec *executionContext) childFields_UserMutation(ctx context.Context, field 
 
 func (ec *executionContext) childFields_UserQuery(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 	switch field.Name {
+	case "list":
+		return ec.fieldContext_UserQuery_list(ctx, field)
 	case "detail":
 		return ec.fieldContext_UserQuery_detail(ctx, field)
 	case "me":
@@ -611,6 +730,36 @@ func (ec *executionContext) field_UserQuery_detail_args(ctx context.Context, raw
 	return args, nil
 }
 
+func (ec *executionContext) field_UserQuery_list_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "filters",
+		func(ctx context.Context, v any) ([]*model.Filter, error) {
+			return ec.unmarshalOFilter2ᚕᚖsimpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐFilter(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["filters"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "page",
+		func(ctx context.Context, v any) (*int, error) {
+			return ec.unmarshalOInt2ᚖint(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["page"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "limit",
+		func(ctx context.Context, v any) (*int, error) {
+			return ec.unmarshalOInt2ᚖint(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["limit"] = arg2
+	return args, nil
+}
+
 func (ec *executionContext) field___Directive_args_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -684,6 +833,98 @@ func (ec *executionContext) field___Type_inputFields_args(ctx context.Context, r
 // endregion ***************************** args.gotpl *****************************
 
 // region    **************************** field.gotpl *****************************
+
+func (ec *executionContext) _FilterQuery_field(ctx context.Context, field graphql.CollectedField, obj *model.FilterQuery) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FilterQuery_field(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Field, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FilterQuery_field(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FilterQuery", field, false, false, "String")
+}
+
+func (ec *executionContext) _FilterQuery_value(ctx context.Context, field graphql.CollectedField, obj *model.FilterQuery) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FilterQuery_value(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Value, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v any) graphql.Marshaler {
+			return ec.marshalNAny2interface(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FilterQuery_value(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FilterQuery", field, false, false, "Any")
+}
+
+func (ec *executionContext) _FilterQuery_type(ctx context.Context, field graphql.CollectedField, obj *model.FilterQuery) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FilterQuery_type(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Type, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v model.Type) graphql.Marshaler {
+			return ec.marshalNType2simpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐType(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FilterQuery_type(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FilterQuery", field, false, false, "Type")
+}
+
+func (ec *executionContext) _FilterQuery_clause(ctx context.Context, field graphql.CollectedField, obj *model.FilterQuery) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FilterQuery_clause(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Clause, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v model.Clause) graphql.Marshaler {
+			return ec.marshalNClause2simpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐClause(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FilterQuery_clause(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FilterQuery", field, false, false, "Clause")
+}
 
 func (ec *executionContext) _LoginResponse_token(ctx context.Context, field graphql.CollectedField, obj *model.LoginResponse) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
@@ -958,7 +1199,7 @@ func (ec *executionContext) _User_followers(ctx context.Context, field graphql.C
 			return ec.fieldContext_User_followers(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.Followers, nil
+			return ec.Resolvers.User().Followers(ctx, obj)
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v []*model.User) graphql.Marshaler {
@@ -972,8 +1213,8 @@ func (ec *executionContext) fieldContext_User_followers(_ context.Context, field
 	fc = &graphql.FieldContext{
 		Object:     "User",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return ec.childFields_User(ctx, field)
 		},
@@ -990,7 +1231,7 @@ func (ec *executionContext) _User_following(ctx context.Context, field graphql.C
 			return ec.fieldContext_User_following(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.Following, nil
+			return ec.Resolvers.User().Following(ctx, obj)
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v []*model.User) graphql.Marshaler {
@@ -1004,8 +1245,8 @@ func (ec *executionContext) fieldContext_User_following(_ context.Context, field
 	fc = &graphql.FieldContext{
 		Object:     "User",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return ec.childFields_User(ctx, field)
 		},
@@ -1057,6 +1298,116 @@ func (ec *executionContext) _User_updated_at(ctx context.Context, field graphql.
 }
 func (ec *executionContext) fieldContext_User_updated_at(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("User", field, false, false, "Time")
+}
+
+func (ec *executionContext) _UserList_page(ctx context.Context, field graphql.CollectedField, obj *model.UserList) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_UserList_page(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Page, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *int) graphql.Marshaler {
+			return ec.marshalOInt2ᚖint(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_UserList_page(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("UserList", field, false, false, "Int")
+}
+
+func (ec *executionContext) _UserList_limit(ctx context.Context, field graphql.CollectedField, obj *model.UserList) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_UserList_limit(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Limit, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *int) graphql.Marshaler {
+			return ec.marshalOInt2ᚖint(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_UserList_limit(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("UserList", field, false, false, "Int")
+}
+
+func (ec *executionContext) _UserList_filters(ctx context.Context, field graphql.CollectedField, obj *model.UserList) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_UserList_filters(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Filters, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []*model.FilterQuery) graphql.Marshaler {
+			return ec.marshalOFilterQuery2ᚕᚖsimpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐFilterQuery(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_UserList_filters(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "UserList",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_FilterQuery(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _UserList_nodes(ctx context.Context, field graphql.CollectedField, obj *model.UserList) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_UserList_nodes(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.UserList().Nodes(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []*model.User) graphql.Marshaler {
+			return ec.marshalNUser2ᚕᚖsimpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐUser(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_UserList_nodes(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "UserList",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_User(ctx, field)
+		},
+	}
+	return fc, nil
 }
 
 func (ec *executionContext) _UserMutation_register(ctx context.Context, field graphql.CollectedField, obj *model.UserMutation) (ret graphql.Marshaler) {
@@ -1255,6 +1606,50 @@ func (ec *executionContext) fieldContext_UserMutation_unfollow(ctx context.Conte
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_UserMutation_unfollow_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _UserQuery_list(ctx context.Context, field graphql.CollectedField, obj *model.UserQuery) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_UserQuery_list(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.UserQuery().List(ctx, obj, fc.Args["filters"].([]*model.Filter), fc.Args["page"].(*int), fc.Args["limit"].(*int))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *model.UserList) graphql.Marshaler {
+			return ec.marshalNUserList2ᚖsimpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐUserList(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_UserQuery_list(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "UserQuery",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_UserList(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_UserQuery_list_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -2423,6 +2818,69 @@ func (ec *executionContext) fieldContext___Type_isOneOf(_ context.Context, field
 
 // region    **************************** input.gotpl *****************************
 
+func (ec *executionContext) unmarshalInputFilter(ctx context.Context, obj any) (model.Filter, error) {
+	var it model.Filter
+	if obj == nil {
+		return it, nil
+	}
+
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"field", "value", "type", "clause"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "field":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("field"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Field = data
+		case "value":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("value"))
+			data, err := ec.unmarshalNAny2interface(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Value = data
+		case "type":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("type"))
+			data, err := ec.unmarshalNType2simpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐType(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Type = data
+		case "clause":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("clause"))
+			data, err := ec.unmarshalNClause2simpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐClause(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Clause = data
+		}
+	}
+	return it, nil
+}
+
+// UnmarshalFilter unmarshals raw into the Filter input type, using the
+// unmarshaler bound to ctx's request. Call it from a resolver to decode an input
+// object that was not passed as a field argument.
+//
+// ctx must come from a gqlgen request; outside one there is no unmarshaler to use
+// and the returned error says so.
+func UnmarshalFilter(ctx context.Context, raw any) (model.Filter, error) {
+	var out model.Filter
+	err := graphql.UnmarshalNamedInputFromContext(ctx, "Filter", raw, &out)
+	return out, err
+}
+
 func (ec *executionContext) unmarshalInputLoginUser(ctx context.Context, obj any) (model.LoginUser, error) {
 	var it model.LoginUser
 	if obj == nil {
@@ -2535,6 +2993,54 @@ func UnmarshalNewUser(ctx context.Context, raw any) (model.NewUser, error) {
 // endregion ************************** interface.gotpl ***************************
 
 // region    **************************** object.gotpl ****************************
+
+var filterQueryImplementors = []string{"FilterQuery"}
+
+func (ec *executionContext) _FilterQuery(ctx context.Context, sel ast.SelectionSet, obj *model.FilterQuery) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, filterQueryImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := graphql.NewDeferredGroup(ctx)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("FilterQuery")
+		case "field":
+			out.Values[i] = ec._FilterQuery_field(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "value":
+			out.Values[i] = ec._FilterQuery_value(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "type":
+			out.Values[i] = ec._FilterQuery_type(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "clause":
+			out.Values[i] = ec._FilterQuery_clause(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	if n := len(deferred.Defers); n > 0 {
+		atomic.AddInt32(&ec.Deferred, int32(min(n, math.MaxInt32)))
+		ec.ProcessDeferredGroup(deferred)
+	}
+
+	return out
+}
 
 var loginResponseImplementors = []string{"LoginResponse"}
 
@@ -2687,38 +3193,89 @@ func (ec *executionContext) _User(ctx context.Context, sel ast.SelectionSet, obj
 		case "id":
 			out.Values[i] = ec._User_id(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "name":
 			out.Values[i] = ec._User_name(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "email":
 			out.Values[i] = ec._User_email(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "followers":
-			out.Values[i] = ec._User_followers(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
-			}
+			out.ResolveConcurrently(ec.OperationContext, &deferred, i,
+				true, true,
+				func(ctx context.Context) graphql.Marshaler {
+					return ec._User_followers(ctx, field, obj)
+				})
 		case "following":
-			out.Values[i] = ec._User_following(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
-			}
+			out.ResolveConcurrently(ec.OperationContext, &deferred, i,
+				true, true,
+				func(ctx context.Context) graphql.Marshaler {
+					return ec._User_following(ctx, field, obj)
+				})
 		case "created_at":
 			out.Values[i] = ec._User_created_at(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "updated_at":
 			out.Values[i] = ec._User_updated_at(ctx, field, obj)
 			if out.Values[i] == graphql.RequiredNull {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	if n := len(deferred.Defers); n > 0 {
+		atomic.AddInt32(&ec.Deferred, int32(min(n, math.MaxInt32)))
+		ec.ProcessDeferredGroup(deferred)
+	}
+
+	return out
+}
+
+var userListImplementors = []string{"UserList"}
+
+func (ec *executionContext) _UserList(ctx context.Context, sel ast.SelectionSet, obj *model.UserList) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, userListImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := graphql.NewDeferredGroup(ctx)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("UserList")
+		case "page":
+			out.Values[i] = ec._UserList_page(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "limit":
+			out.Values[i] = ec._UserList_limit(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "filters":
+			out.Values[i] = ec._UserList_filters(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "nodes":
+			out.ResolveConcurrently(ec.OperationContext, &deferred, i,
+				true, true,
+				func(ctx context.Context) graphql.Marshaler {
+					return ec._UserList_nodes(ctx, field, obj)
+				})
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -2799,6 +3356,12 @@ func (ec *executionContext) _UserQuery(ctx context.Context, sel ast.SelectionSet
 		switch field.Name {
 		case "__typename":
 			out.Values[i] = graphql.MarshalString("UserQuery")
+		case "list":
+			out.ResolveConcurrently(ec.OperationContext, &deferred, i,
+				true, true,
+				func(ctx context.Context) graphql.Marshaler {
+					return ec._UserQuery_list(ctx, field, obj)
+				})
 		case "detail":
 			out.ResolveConcurrently(ec.OperationContext, &deferred, i,
 				true, true,
@@ -3190,6 +3753,24 @@ func (ec *executionContext) ___Type(ctx context.Context, sel ast.SelectionSet, o
 
 // region    ***************************** type.gotpl *****************************
 
+func (ec *executionContext) unmarshalNAny2interface(ctx context.Context, v any) (any, error) {
+	res, err := graphql.UnmarshalAny(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNAny2interface(ctx context.Context, sel ast.SelectionSet, v any) graphql.Marshaler {
+	if v == nil {
+		graphql.AddInvalidNullError(ctx, "Any!")
+		return graphql.Null
+	}
+	_ = sel
+	res := graphql.MarshalAny(v)
+	if res == graphql.Null {
+		graphql.AddInvalidNullFromMarshaler(ctx, "Any!")
+	}
+	return res
+}
+
 func (ec *executionContext) unmarshalNBoolean2bool(ctx context.Context, v any) (bool, error) {
 	res, err := graphql.UnmarshalBoolean(v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -3202,6 +3783,16 @@ func (ec *executionContext) marshalNBoolean2bool(ctx context.Context, sel ast.Se
 		graphql.AddInvalidNullFromMarshaler(ctx, "Boolean!")
 	}
 	return res
+}
+
+func (ec *executionContext) unmarshalNClause2simpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐClause(ctx context.Context, v any) (model.Clause, error) {
+	var res model.Clause
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNClause2simpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐClause(ctx context.Context, sel ast.SelectionSet, v model.Clause) graphql.Marshaler {
+	return v
 }
 
 func (ec *executionContext) unmarshalNID2int(ctx context.Context, v any) (int, error) {
@@ -3264,6 +3855,26 @@ func (ec *executionContext) marshalNTime2timeᚐTime(ctx context.Context, sel as
 	return res
 }
 
+func (ec *executionContext) unmarshalNType2simpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐType(ctx context.Context, v any) (model.Type, error) {
+	var res model.Type
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNType2simpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐType(ctx context.Context, sel ast.SelectionSet, v model.Type) graphql.Marshaler {
+	return v
+}
+
+func (ec *executionContext) marshalNUser2ᚕᚖsimpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐUser(ctx context.Context, sel ast.SelectionSet, v []*model.User) graphql.Marshaler {
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalOUser2ᚖsimpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐUser(ctx, sel, v[i])
+	})
+
+	return ret
+}
+
 func (ec *executionContext) marshalNUser2ᚕᚖsimpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐUserᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.User) graphql.Marshaler {
 	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
 		fc := graphql.GetFieldContext(ctx)
@@ -3286,6 +3897,14 @@ func (ec *executionContext) marshalNUser2ᚖsimpleᚑuserfollowᚑgraphqlᚋgrap
 		return graphql.Null
 	}
 	return ec._User(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNUserList2ᚖsimpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐUserList(ctx context.Context, sel ast.SelectionSet, v *model.UserList) graphql.Marshaler {
+	if v == nil {
+		graphql.AddInvalidNullError(ctx, "UserList!")
+		return graphql.Null
+	}
+	return ec._UserList(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalNUserMutation2ᚖsimpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐUserMutation(ctx context.Context, sel ast.SelectionSet, v *model.UserMutation) graphql.Marshaler {
@@ -3476,6 +4095,69 @@ func (ec *executionContext) marshalOBoolean2ᚖbool(ctx context.Context, sel ast
 	return res
 }
 
+func (ec *executionContext) unmarshalOFilter2ᚕᚖsimpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐFilter(ctx context.Context, v any) ([]*model.Filter, error) {
+	if v == nil {
+		return nil, nil
+	}
+	vSlice := graphql.CoerceList(v)
+	var err error
+	res := make([]*model.Filter, len(vSlice))
+	for i := range vSlice {
+		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithIndex(i))
+		res[i], err = ec.unmarshalOFilter2ᚖsimpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐFilter(ctx, vSlice[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
+}
+
+func (ec *executionContext) unmarshalOFilter2ᚖsimpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐFilter(ctx context.Context, v any) (*model.Filter, error) {
+	if v == nil {
+		return nil, nil
+	}
+	res, err := ec.unmarshalInputFilter(ctx, v)
+	return &res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOFilterQuery2ᚕᚖsimpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐFilterQuery(ctx context.Context, sel ast.SelectionSet, v []*model.FilterQuery) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalOFilterQuery2ᚖsimpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐFilterQuery(ctx, sel, v[i])
+	})
+
+	return ret
+}
+
+func (ec *executionContext) marshalOFilterQuery2ᚖsimpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐFilterQuery(ctx context.Context, sel ast.SelectionSet, v *model.FilterQuery) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._FilterQuery(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalOInt2ᚖint(ctx context.Context, v any) (*int, error) {
+	if v == nil {
+		return nil, nil
+	}
+	res, err := graphql.UnmarshalInt(v)
+	return &res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOInt2ᚖint(ctx context.Context, sel ast.SelectionSet, v *int) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	_ = sel
+	_ = ctx
+	res := graphql.MarshalInt(*v)
+	return res
+}
+
 func (ec *executionContext) unmarshalOString2ᚖstring(ctx context.Context, v any) (*string, error) {
 	if v == nil {
 		return nil, nil
@@ -3510,6 +4192,13 @@ func (ec *executionContext) marshalOTime2ᚖtimeᚐTime(ctx context.Context, sel
 	_ = ctx
 	res := graphql.MarshalTime(*v)
 	return res
+}
+
+func (ec *executionContext) marshalOUser2ᚖsimpleᚑuserfollowᚑgraphqlᚋgraphᚋmodelᚐUser(ctx context.Context, sel ast.SelectionSet, v *model.User) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._User(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalO__EnumValue2ᚕgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐEnumValueᚄ(ctx context.Context, sel ast.SelectionSet, v []introspection.EnumValue) graphql.Marshaler {

@@ -7,18 +7,17 @@ package graph
 
 import (
 	"context"
-	"fmt"
 	"simple-userfollow-graphql/graph/model"
 )
 
 // User is the resolver for the user field.
 func (r *mutationResolver) User(ctx context.Context) (*model.UserMutation, error) {
-	panic(fmt.Errorf("not implemented: User - user"))
+	return &model.UserMutation{}, nil
 }
 
 // User is the resolver for the user field.
 func (r *queryResolver) User(ctx context.Context) (*model.UserQuery, error) {
-	panic(fmt.Errorf("not implemented: User - user"))
+	return &model.UserQuery{}, nil
 }
 
 // Mutation returns MutationResolver implementation.

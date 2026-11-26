@@ -1,0 +1,28 @@
+input Filter {
+    field: String!
+    value: Any!
+    type: Type!
+    clause:  Clause!
+}
+
+type FilterQuery {
+    field: String!
+    value: Any!
+    type: Type!
+    clause:  Clause!
+}
+
+enum Type {
+    STRING
+    INT
+    BOOL
+}
+
+enum Clause {
+    ISEQUALTO
+    WHEREIN
+    ISGREATERTHAN
+    ISGREATERTHANEQUAL
+    LIKE
+}
+
